@@ -19,9 +19,10 @@ from PIL import Image, ImageDraw
 
 
 APP_VERSION = "0.1.0"
-DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
+DEFAULT_SERVER_URL = "https://green-5xdl.onrender.com"
 DEFAULT_INTERVAL_SECONDS = 60
 BLOCKLIST_REFRESH_SECONDS = 300
+LOCAL_SERVER_URLS = {"http://127.0.0.1:8000", "http://localhost:8000"}
 
 
 def config_path() -> Path:
@@ -46,6 +47,8 @@ def load_config() -> dict[str, Any]:
         config = json.load(config_file)
 
     config.setdefault("server_url", DEFAULT_SERVER_URL)
+    if str(config.get("server_url", "")).rstrip("/") in LOCAL_SERVER_URLS:
+        config["server_url"] = DEFAULT_SERVER_URL
     config.setdefault("interval_seconds", DEFAULT_INTERVAL_SECONDS)
     return config
 
@@ -303,7 +306,7 @@ class GreenAgentApp:
 
         server_label = ttk.Label(frame, text="Server URL")
         server_label.pack(anchor="w")
-        server_entry = ttk.Entry(frame, textvariable=self.server_url)
+        server_entry = ttk.Entry(frame, textvariable=self.server_url, state="readonly")
         server_entry.pack(fill="x", pady=(4, 10))
 
         token_label = ttk.Label(frame, text="Activation Token")
@@ -358,12 +361,12 @@ class GreenAgentApp:
         self.exit_button.pack(anchor="w", pady=(14, 0))
 
         if self.is_activated:
-            self.token_entry.configure(state="disabled")
             self.activate_button.configure(state="disabled")
         else:
             self.exit_button.configure(state="disabled")
             self.start_blocking_button.configure(state="disabled")
             self.stop_blocking_button.configure(state="disabled")
+            self.token_entry.focus_set()
 
     def create_tray_image(self) -> Image.Image:
         image = Image.new("RGB", (64, 64), "#19a55b")
@@ -450,7 +453,6 @@ class GreenAgentApp:
     def on_activation_success(self) -> None:
         self.status_text.set("Activated")
         self.details_text.set(f"Device ID: {self.config['device_id']}")
-        self.token_entry.configure(state="disabled")
         if self.exit_button:
             self.exit_button.configure(state="normal")
         if self.start_blocking_button:
