@@ -467,6 +467,29 @@ class GreenAgentApp:
         self.activate_button.configure(state="normal")
         messagebox.showerror("Activation failed", error)
 
+    def reset_activation(self, message: str) -> None:
+        self.stop_event.set()
+        self.blocklist_stop_event.set()
+        for key in ("device_id", "token", "recovery_name"):
+            self.config.pop(key, None)
+        self.config["protection_enabled"] = False
+        save_config(self.config)
+
+        self.activation_token.set("")
+        self.status_text.set("Activation needed")
+        self.details_text.set(message)
+        self.last_heartbeat_text.set("-")
+        self.blocklist_text.set("Admin blocklist not loaded")
+        if self.activate_button:
+            self.activate_button.configure(state="normal")
+        if self.exit_button:
+            self.exit_button.configure(state="disabled")
+        if self.start_blocking_button:
+            self.start_blocking_button.configure(state="disabled")
+        if self.stop_blocking_button:
+            self.stop_blocking_button.configure(state="disabled")
+        self.token_entry.focus_set()
+
     def start_heartbeat_loop(self) -> None:
         if self.worker and self.worker.is_alive():
             return
@@ -485,6 +508,15 @@ class GreenAgentApp:
                 self.root.after(0, lambda value=timestamp: self.last_heartbeat_text.set(value))
                 self.root.after(0, lambda: self.status_text.set("Running"))
             except requests.RequestException as exc:
+                status_code = getattr(exc.response, "status_code", None)
+                if status_code == 401:
+                    self.root.after(
+                        0,
+                        lambda: self.reset_activation(
+                            "This saved activation is no longer valid. Paste a new activation token."
+                        ),
+                    )
+                    return
                 self.root.after(0, lambda error=str(exc): self.status_text.set(f"Heartbeat failed: {error}"))
 
             self.stop_event.wait(interval_seconds)
