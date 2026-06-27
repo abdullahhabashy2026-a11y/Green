@@ -52,6 +52,11 @@ class HeartbeatPayload(BaseModel):
     token: str = Field(min_length=8, max_length=256)
     device_name: str | None = Field(default=None, max_length=255)
     windows_user: str | None = Field(default=None, max_length=255)
+    platform: str | None = Field(default=None, max_length=32)
+    private_dns_mode: str | None = Field(default=None, max_length=64)
+    private_dns_specifier: str | None = Field(default=None, max_length=255)
+    vpn_active: bool | None = None
+    battery_optimization_ignored: bool | None = None
     agent_version: str | None = Field(default=None, max_length=64)
     status: str = Field(default="running", max_length=32)
 
@@ -60,6 +65,11 @@ class ActivationPayload(BaseModel):
     enrollment_token: str = Field(min_length=8, max_length=256)
     device_name: str | None = Field(default=None, max_length=255)
     windows_user: str | None = Field(default=None, max_length=255)
+    platform: str | None = Field(default=None, max_length=32)
+    private_dns_mode: str | None = Field(default=None, max_length=64)
+    private_dns_specifier: str | None = Field(default=None, max_length=255)
+    vpn_active: bool | None = None
+    battery_optimization_ignored: bool | None = None
     agent_version: str | None = Field(default=None, max_length=64)
 
 
@@ -70,6 +80,12 @@ class DomainEventPayload(BaseModel):
     category: str = Field(min_length=1, max_length=64)
     decision: str = Field(min_length=1, max_length=32)
     reason: str | None = Field(default=None, max_length=255)
+
+
+class DomainCheckPayload(BaseModel):
+    device_id: str = Field(min_length=3, max_length=128)
+    token: str = Field(min_length=8, max_length=256)
+    domain: str = Field(min_length=1, max_length=255)
 
 
 def now_utc() -> datetime:
@@ -94,6 +110,12 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_db() -> None:
     with get_connection() as conn:
         conn.execute(
@@ -112,6 +134,11 @@ def init_db() -> None:
             )
             """
         )
+        ensure_column(conn, "devices", "platform", "TEXT")
+        ensure_column(conn, "devices", "private_dns_mode", "TEXT")
+        ensure_column(conn, "devices", "private_dns_specifier", "TEXT")
+        ensure_column(conn, "devices", "vpn_active", "INTEGER")
+        ensure_column(conn, "devices", "battery_optimization_ignored", "INTEGER")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS domain_events (
@@ -146,6 +173,21 @@ def init_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_blocked_domains_category
             ON blocked_domains(category)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS blocked_keywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_blocked_keywords_keyword
+            ON blocked_keywords(keyword)
             """
         )
         conn.execute(
@@ -381,6 +423,63 @@ def parse_domain_lines(raw_domains: str) -> list[str]:
     return domains
 
 
+def normalize_keyword(keyword: str) -> str:
+    return keyword.strip().lower()
+
+
+def is_valid_keyword(keyword: str) -> bool:
+    return 2 <= len(keyword) <= 64 and re.fullmatch(r"[a-z0-9-]+", keyword) is not None
+
+
+def domain_suffixes(domain: str) -> list[str]:
+    labels = [label for label in domain.split(".") if label]
+    return [".".join(labels[index:]) for index in range(len(labels))]
+
+
+def check_domain_policy(domain: str) -> dict[str, str]:
+    normalized = normalize_domain(domain)
+    if not normalized:
+        return {
+            "domain": normalized,
+            "category": "unknown",
+            "decision": "allowed",
+            "reason": "Invalid or empty domain",
+        }
+
+    with get_connection() as conn:
+        for suffix in domain_suffixes(normalized):
+            row = conn.execute(
+                "SELECT category FROM blocked_domains WHERE domain = ?",
+                (suffix,),
+            ).fetchone()
+            if row is not None:
+                return {
+                    "domain": normalized,
+                    "category": row["category"],
+                    "decision": "blocked",
+                    "reason": f"Matched server list: {suffix}",
+                }
+
+        keyword_rows = conn.execute("SELECT keyword FROM blocked_keywords ORDER BY keyword ASC").fetchall()
+
+    for row in keyword_rows:
+        keyword = row["keyword"]
+        if keyword and keyword in normalized:
+            return {
+                "domain": normalized,
+                "category": "keyword",
+                "decision": "blocked",
+                "reason": f"Matched server keyword: {keyword}",
+            }
+
+    return {
+        "domain": normalized,
+        "category": "unknown",
+        "decision": "allowed",
+        "reason": "No server blocklist match",
+    }
+
+
 def extract_domains_from_blocklist(raw_text: str) -> list[str]:
     domains: list[str] = []
     seen: set[str] = set()
@@ -440,27 +539,66 @@ def list_blocked_domains(limit: int | None = None) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def list_blocked_domains_page(page: int, page_size: int) -> list[dict[str, Any]]:
+def list_blocked_domains_page(page: int, page_size: int, search: str = "") -> list[dict[str, Any]]:
     offset = (page - 1) * page_size
+    where_clause = ""
+    params: list[Any] = []
+    if search:
+        where_clause = "WHERE domain LIKE ?"
+        params.append(f"%{search}%")
+
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT *
             FROM blocked_domains
+            {where_clause}
             ORDER BY category ASC, domain ASC
             LIMIT ? OFFSET ?
             """,
-            (page_size, offset),
+            (*params, page_size, offset),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
-def count_blocked_domains() -> int:
+def count_blocked_domains(search: str = "") -> int:
+    where_clause = ""
+    params: list[Any] = []
+    if search:
+        where_clause = "WHERE domain LIKE ?"
+        params.append(f"%{search}%")
+
+    with get_connection() as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM blocked_domains
+            {where_clause}
+            """
+            ,
+            params,
+        ).fetchone()
+    return int(row["total"])
+
+
+def list_blocked_keywords() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM blocked_keywords
+            ORDER BY keyword ASC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_blocked_keywords() -> int:
     with get_connection() as conn:
         row = conn.execute(
             """
             SELECT COUNT(*) AS total
-            FROM blocked_domains
+            FROM blocked_keywords
             """
         ).fetchone()
     return int(row["total"])
@@ -575,6 +713,7 @@ def generate_token() -> str:
 def dashboard(request: Request) -> HTMLResponse:
     devices = list_devices()
     blocked_domain_total = count_blocked_domains()
+    blocked_keywords = list_blocked_keywords()
     remote_blocklists = list_remote_blocklists()
     counts = {"active": 0, "delayed": 0, "no_signal": 0, "never": 0, "exited": 0}
     for device in devices:
@@ -587,6 +726,8 @@ def dashboard(request: Request) -> HTMLResponse:
             "request": request,
             "devices": devices,
             "blocked_domain_total": blocked_domain_total,
+            "blocked_keywords": blocked_keywords,
+            "blocked_keyword_total": len(blocked_keywords),
             "remote_blocklists": remote_blocklists,
             "counts": counts,
             "generated_at": utc_iso(),
@@ -599,18 +740,20 @@ def blocked_domains_page(
     request: Request,
     page: int = 1,
     page_size: int = 50,
+    q: str = "",
 ) -> HTMLResponse:
     allowed_page_sizes = {25, 50, 100, 200}
     if page_size not in allowed_page_sizes:
         page_size = 50
     page = max(1, page)
+    search = normalize_domain(q) if q.strip() else ""
 
-    total = count_blocked_domains()
+    total = count_blocked_domains(search=search)
     total_pages = max(1, (total + page_size - 1) // page_size)
     if page > total_pages:
         page = total_pages
 
-    domains = list_blocked_domains_page(page=page, page_size=page_size)
+    domains = list_blocked_domains_page(page=page, page_size=page_size, search=search)
 
     return templates.TemplateResponse(
         "blocked_domains.html",
@@ -621,6 +764,7 @@ def blocked_domains_page(
             "page": page,
             "page_size": page_size,
             "page_sizes": sorted(allowed_page_sizes),
+            "search": search,
             "total_pages": total_pages,
             "previous_page": page - 1 if page > 1 else None,
             "next_page": page + 1 if page < total_pages else None,
@@ -676,6 +820,41 @@ def create_device(
     raise HTTPException(status_code=500, detail="Could not generate unique device credentials")
 
 
+@app.post("/devices/{device_id}/delete")
+def delete_device(device_id: str) -> RedirectResponse:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM domain_events WHERE device_id = ?", (device_id,))
+        conn.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
+        conn.commit()
+
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/devices/{device_id}/history/delete")
+def delete_device_history(device_id: str) -> RedirectResponse:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM domain_events WHERE device_id = ?", (device_id,))
+        conn.commit()
+
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/devices/{device_id}/rename")
+def rename_device(device_id: str, recovery_name: str = Form(...)) -> RedirectResponse:
+    recovery_name = recovery_name.strip()
+    if not recovery_name:
+        raise HTTPException(status_code=400, detail="Invalid recovery name")
+
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE devices SET recovery_name = ? WHERE device_id = ?",
+            (recovery_name, device_id),
+        )
+        conn.commit()
+
+    return RedirectResponse("/", status_code=303)
+
+
 @app.post("/blocked-domains")
 def create_blocked_domain(
     domain: str = Form(...),
@@ -726,6 +905,40 @@ def import_blocked_domains(
                 """,
                 (domain, category, utc_iso()),
             )
+        conn.commit()
+
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/blocked-keywords")
+def create_blocked_keyword(
+    keyword: str = Form(...),
+) -> RedirectResponse:
+    normalized = normalize_keyword(keyword)
+
+    if not is_valid_keyword(normalized):
+        raise HTTPException(status_code=400, detail="Invalid blocked keyword")
+
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO blocked_keywords (keyword, created_at)
+                VALUES (?, ?)
+                """,
+                (normalized, utc_iso()),
+            )
+            conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Keyword already exists") from exc
+
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/blocked-keywords/{keyword_id}/delete")
+def delete_blocked_keyword(keyword_id: int) -> RedirectResponse:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM blocked_keywords WHERE id = ?", (keyword_id,))
         conn.commit()
 
     return RedirectResponse("/", status_code=303)
@@ -799,6 +1012,11 @@ def heartbeat(payload: HeartbeatPayload) -> dict[str, str]:
             UPDATE devices
             SET device_name = ?,
                 windows_user = ?,
+                platform = COALESCE(?, platform),
+                private_dns_mode = COALESCE(?, private_dns_mode),
+                private_dns_specifier = COALESCE(?, private_dns_specifier),
+                vpn_active = COALESCE(?, vpn_active),
+                battery_optimization_ignored = COALESCE(?, battery_optimization_ignored),
                 agent_version = ?,
                 status = ?,
                 last_seen_at = ?
@@ -807,6 +1025,11 @@ def heartbeat(payload: HeartbeatPayload) -> dict[str, str]:
             (
                 payload.device_name,
                 payload.windows_user,
+                payload.platform,
+                payload.private_dns_mode,
+                payload.private_dns_specifier,
+                payload.vpn_active,
+                payload.battery_optimization_ignored,
                 payload.agent_version,
                 payload.status,
                 utc_iso(),
@@ -834,6 +1057,11 @@ def activate(payload: ActivationPayload) -> dict[str, str]:
             UPDATE devices
             SET device_name = ?,
                 windows_user = ?,
+                platform = COALESCE(?, platform),
+                private_dns_mode = COALESCE(?, private_dns_mode),
+                private_dns_specifier = COALESCE(?, private_dns_specifier),
+                vpn_active = COALESCE(?, vpn_active),
+                battery_optimization_ignored = COALESCE(?, battery_optimization_ignored),
                 agent_version = ?,
                 status = ?,
                 last_seen_at = ?
@@ -842,6 +1070,11 @@ def activate(payload: ActivationPayload) -> dict[str, str]:
             (
                 payload.device_name,
                 payload.windows_user,
+                payload.platform,
+                payload.private_dns_mode,
+                payload.private_dns_specifier,
+                payload.vpn_active,
+                payload.battery_optimization_ignored,
                 payload.agent_version,
                 "running",
                 utc_iso(),
@@ -900,6 +1133,20 @@ def domain_event(payload: DomainEventPayload) -> dict[str, str]:
     return {"ok": "true", "message": "domain event recorded"}
 
 
+@app.post("/api/domain-check")
+def domain_check(payload: DomainCheckPayload) -> dict[str, str]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT token FROM devices WHERE device_id = ?",
+            (payload.device_id,),
+        ).fetchone()
+
+        if row is None or row["token"] != payload.token:
+            raise HTTPException(status_code=401, detail="Invalid device credentials")
+
+    return check_domain_policy(payload.domain)
+
+
 @app.get("/api/blocklist")
 def blocklist_api(device_id: str, token: str) -> dict[str, Any]:
     with get_connection() as conn:
@@ -911,7 +1158,11 @@ def blocklist_api(device_id: str, token: str) -> dict[str, Any]:
         if row is None or row["token"] != token:
             raise HTTPException(status_code=401, detail="Invalid device credentials")
 
-    return {"blocked_domains": list_blocked_domains(), "generated_at": utc_iso()}
+    return {
+        "blocked_domains": list_blocked_domains(),
+        "blocked_keywords": list_blocked_keywords(),
+        "generated_at": utc_iso(),
+    }
 
 
 @app.get("/api/devices")

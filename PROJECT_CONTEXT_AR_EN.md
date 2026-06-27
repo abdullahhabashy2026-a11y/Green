@@ -39,6 +39,7 @@ E:\HABASHY\Python Codes\Green
 
 - `server`: سيرفر FastAPI + قاعدة SQLite + داشبورد.
 - `agent-windows`: Windows Agent + DNS filter + سكربتات البناء والطوارئ.
+- `agent-android`: نموذج Android أولي Native Kotlin يستخدم VPNService لحجب DNS.
 - `PROJECT_CONTEXT_AR_EN.md`: ملف التوثيق الحالي بالعربية والإنجليزية.
 - `README.md`: ملاحظات تشغيل مختصرة.
 
@@ -368,6 +369,44 @@ cd "E:\HABASHY\Python Codes\Green\agent-windows"
 - لا توجد حماية ضد حذف البرنامج بعد.
 - لا توجد استضافة أونلاين بعد.
 
+### Android Prototype
+
+بدأت نسخة الموبايل الأولى على Android داخل:
+
+```text
+agent-android
+```
+
+الاتجاه الحالي:
+
+- تطبيق Android Native Kotlin.
+- التفعيل بنفس `Activation Token`.
+- حفظ `device_id` و`token` محليا.
+- إرسال heartbeat لنفس الداشبورد.
+- زر `Start Blocking` و`Stop Blocking`.
+- استخدام `VPNService` كطبقة DNS filtering محلية.
+- سحب نفس قوائم الأدمن من:
+
+```text
+GET /api/blocklist
+```
+
+- تسجيل الدومينات المحجوبة في:
+
+```text
+POST /api/domain-event
+```
+
+ملاحظة تشغيل:
+
+- على Android Emulator يستخدم التطبيق افتراضيا:
+
+```text
+http://10.0.2.2:8000
+```
+
+- على موبايل حقيقي يجب تشغيل السيرفر على `0.0.0.0` واستخدام IP الكمبيوتر على نفس الشبكة.
+
 ### الخطوات القادمة المقترحة
 
 1. إضافة Login للأدمن.
@@ -415,6 +454,7 @@ E:\HABASHY\Python Codes\Green
 
 - `server`: FastAPI + SQLite + Dashboard.
 - `agent-windows`: Windows Agent + DNS filter + build/emergency scripts.
+- `agent-android`: initial native Kotlin Android prototype using VPNService DNS filtering.
 - `PROJECT_CONTEXT_AR_EN.md`: current bilingual documentation.
 - `README.md`: short running notes.
 
@@ -743,6 +783,44 @@ cd "E:\HABASHY\Python Codes\Green\agent-windows"
 - No installer yet.
 - No anti-uninstall/tamper protection yet.
 - No online hosting yet.
+
+### Android Prototype
+
+The first mobile version has started for Android in:
+
+```text
+agent-android
+```
+
+Current direction:
+
+- Native Kotlin Android app.
+- Activation with the same `Activation Token`.
+- Local `device_id` and `token` storage.
+- Heartbeat to the same dashboard.
+- `Start Blocking` and `Stop Blocking`.
+- Local DNS filtering through Android `VPNService`.
+- Reuse admin blocklists from:
+
+```text
+GET /api/blocklist
+```
+
+- Log blocked domains through:
+
+```text
+POST /api/domain-event
+```
+
+Run note:
+
+- Android Emulator default server URL:
+
+```text
+http://10.0.2.2:8000
+```
+
+- A real Android phone needs the server running on `0.0.0.0` and the computer LAN IP entered in the app.
 
 ### Suggested Next Steps
 

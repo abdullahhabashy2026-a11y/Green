@@ -62,16 +62,21 @@
           <table>
             <thead>
               <tr>
-                <th>Status</th>
+                <th>Connection</th>
+                <th>Blocking</th>
                 <th>Recovery</th>
-                <th>Activity</th>
+                <th>Actions</th>
                 <th>Activation Token</th>
                 <th>Device ID</th>
+                <th>Platform</th>
+                <th>Private DNS</th>
+                <th>Android Checks</th>
                 <th>Device</th>
                 <th>Windows User</th>
                 <th>Version</th>
                 <th>Last Seen</th>
                 <th>Age</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -82,12 +87,78 @@
                     {{ device.computed_status.label }}
                   </span>
                 </td>
+                <td>
+                  {% if device.platform == "android" %}
+                    {% if device.vpn_active %}
+                      <span class="status-pill status-active">Blocking Active</span>
+                    {% else %}
+                      <span class="status-pill status-exited">Blocking Off</span>
+                    {% endif %}
+                  {% elif device.status == "blocking" %}
+                    <span class="status-pill status-active">Blocking Active</span>
+                  {% else %}
+                    <span class="status-pill status-never">Unknown</span>
+                  {% endif %}
+                </td>
                 <td>{{ device.recovery_name }}</td>
                 <td>
-                  <a class="action-link" href="/devices/{{ device.device_id }}/activity">View</a>
+                  <div class="action-stack">
+                    <a class="action-link" href="/devices/{{ device.device_id }}/activity">View</a>
+                    <form class="inline-rename-form" method="post" action="/devices/{{ device.device_id }}/rename">
+                      <input name="recovery_name" value="{{ device.recovery_name }}" required>
+                      <button class="small-button" type="submit">Rename</button>
+                    </form>
+                    <form method="post" action="/devices/{{ device.device_id }}/history/delete">
+                      <button class="small-button" type="submit">Delete History</button>
+                    </form>
+                    <form method="post" action="/devices/{{ device.device_id }}/delete">
+                      <button class="small-button danger-button" type="submit">Delete</button>
+                    </form>
+                  </div>
                 </td>
                 <td><code>{{ device.token }}</code></td>
                 <td><code>{{ device.device_id }}</code></td>
+                <td>{{ device.platform or "windows" }}</td>
+                <td>
+                  {% if device.platform == "android" %}
+                    {% if device.private_dns_mode == "hostname" %}
+                      <span class="dns-pill dns-warning">Enabled: {{ device.private_dns_specifier or "provider" }}</span>
+                    {% elif device.private_dns_mode == "opportunistic" %}
+                      <span class="dns-pill dns-ok">Automatic</span>
+                    {% elif device.private_dns_mode == "off" %}
+                      <span class="dns-pill dns-ok">Off</span>
+                    {% else %}
+                      <span class="dns-pill dns-warning">Unknown</span>
+                    {% endif %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if device.platform == "android" %}
+                    <div class="check-list">
+                      {% if device.vpn_active %}
+                        <span class="dns-pill dns-ok">VPN Active</span>
+                      {% else %}
+                        <span class="dns-pill dns-warning">VPN Inactive</span>
+                      {% endif %}
+
+                      {% if device.battery_optimization_ignored %}
+                        <span class="dns-pill dns-ok">Battery OK</span>
+                      {% else %}
+                        <span class="dns-pill dns-warning">Battery Warning</span>
+                      {% endif %}
+
+                      {% if device.computed_status.key == "active" %}
+                        <span class="dns-pill dns-ok">Server OK</span>
+                      {% else %}
+                        <span class="dns-pill dns-warning">Server Delayed</span>
+                      {% endif %}
+                    </div>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
                 <td>{{ device.device_name or "-" }}</td>
                 <td>{{ device.windows_user or "-" }}</td>
                 <td>{{ device.agent_version or "-" }}</td>
@@ -102,7 +173,7 @@
               </tr>
               {% else %}
               <tr>
-                <td class="empty-state" colspan="10">No devices registered yet.</td>
+                <td class="empty-state" colspan="15">No devices registered yet.</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -151,6 +222,51 @@
           </label>
           <button type="submit">Import List</button>
         </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Blocked Keywords</h2>
+          <p class="panel-subtitle">
+            {{ blocked_keyword_total }} saved keywords. Any domain containing one of these keywords is blocked.
+          </p>
+        </div>
+        <form class="keyword-form" method="post" action="/blocked-keywords">
+          <label>
+            Keyword
+            <input name="keyword" placeholder="porn" required>
+          </label>
+          <button type="submit">Add Keyword</button>
+        </form>
+
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th>Keyword</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for keyword in blocked_keywords %}
+              <tr>
+                <td><code>{{ keyword.keyword }}</code></td>
+                <td>{{ keyword.created_at }}</td>
+                <td>
+                  <form method="post" action="/blocked-keywords/{{ keyword.id }}/delete">
+                    <button class="small-button" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td class="empty-state" colspan="3">No blocked keywords yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel">

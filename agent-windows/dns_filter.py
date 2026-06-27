@@ -88,8 +88,17 @@ def domain_suffixes(domain: str) -> list[str]:
 
 
 def classify_domain(domain: str, dynamic_domains: dict[str, str] | None = None) -> DomainDecision:
+    return classify_domain_with_keywords(domain, dynamic_domains=dynamic_domains, blocked_keywords=None)
+
+
+def classify_domain_with_keywords(
+    domain: str,
+    dynamic_domains: dict[str, str] | None = None,
+    blocked_keywords: set[str] | None = None,
+) -> DomainDecision:
     normalized = normalize_domain(domain)
     dynamic_domains = dynamic_domains or {}
+    blocked_keywords = blocked_keywords or set()
 
     for suffix in ALLOW_SUFFIXES:
         if matches_suffix(normalized, suffix):
@@ -108,6 +117,15 @@ def classify_domain(domain: str, dynamic_domains: dict[str, str] | None = None) 
                 category=category,
                 decision="blocked",
                 reason=f"Matched admin list: {suffix}",
+            )
+
+    for keyword in sorted(blocked_keywords):
+        if keyword and keyword in normalized:
+            return DomainDecision(
+                domain=normalized,
+                category="keyword",
+                decision="blocked",
+                reason=f"Matched blocked keyword: {keyword}",
             )
 
     for suffix in ADULT_SUFFIXES:
@@ -145,7 +163,9 @@ class DNSFilterServer:
         self.event_callback = event_callback
         self.upstream_servers = upstream_servers or list(FALLBACK_UPSTREAM_DNS)
         self.dynamic_domains: dict[str, str] = {}
+        self.blocked_keywords: set[str] = set()
         self._dynamic_domains_lock = threading.Lock()
+        self._blocked_keywords_lock = threading.Lock()
         self._server: socketserver.ThreadingUDPServer | None = None
         self._thread: threading.Thread | None = None
         self._last_logged: dict[tuple[str, str], float] = {}
@@ -188,16 +208,33 @@ class DNSFilterServer:
         with self._dynamic_domains_lock:
             self.dynamic_domains = normalized_domains
 
+    def update_blocked_keywords(self, keywords: list[str]) -> None:
+        normalized_keywords = {
+            keyword.strip().lower()
+            for keyword in keywords
+            if keyword.strip()
+        }
+        with self._blocked_keywords_lock:
+            self.blocked_keywords = normalized_keywords
+
     def get_dynamic_domains(self) -> dict[str, str]:
         with self._dynamic_domains_lock:
             return dict(self.dynamic_domains)
+
+    def get_blocked_keywords(self) -> set[str]:
+        with self._blocked_keywords_lock:
+            return set(self.blocked_keywords)
 
     def handle_query(self, data: bytes) -> bytes:
         try:
             request = DNSRecord.parse(data)
             qname = normalize_domain(str(request.q.qname))
             qtype = QTYPE[request.q.qtype]
-            decision = classify_domain(qname, self.get_dynamic_domains())
+            decision = classify_domain_with_keywords(
+                qname,
+                dynamic_domains=self.get_dynamic_domains(),
+                blocked_keywords=self.get_blocked_keywords(),
+            )
             self.log_decision(decision)
 
             if decision.decision == "blocked":

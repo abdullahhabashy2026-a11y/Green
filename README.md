@@ -12,6 +12,7 @@ This phase marks a working Windows version for blocking known adult websites usi
 
 - `server`: FastAPI backend, SQLite database, and a simple color-based admin dashboard.
 - `agent-windows`: Python agent that sends a heartbeat every 60 seconds.
+- `agent-android`: native Android/Kotlin prototype using VPNService for DNS-level filtering.
 - `server/blocklists`: exported starter blocklists used to seed a fresh database.
 - `docs`: v0.1 notes and API shape.
 
@@ -117,3 +118,35 @@ For a one-time test:
 ```powershell
 python agent.py --once
 ```
+
+## Android prototype
+
+The first Android prototype lives in:
+
+```text
+agent-android
+```
+
+It is a native Kotlin Android app with:
+
+- activation by the same dashboard token.
+- local config storage.
+- heartbeat to `/api/heartbeat`.
+- `Start Blocking` / `Stop Blocking`.
+- Android `VPNService` DNS filtering.
+- blocklist loading from `/api/blocklist`.
+- blocked domain event logging to `/api/domain-event`.
+
+For Android Emulator, the default server URL is:
+
+```text
+http://10.0.2.2:8000
+```
+
+For a real Android phone, run the server on `0.0.0.0` and enter the computer LAN IP in the app, for example:
+
+```text
+http://192.168.1.20:8000
+```
+
+Open the project folder in Android Studio and build the `agent-android` module.

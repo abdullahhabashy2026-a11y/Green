@@ -106,7 +106,7 @@ def send_domain_event(config: dict[str, Any], decision: DomainDecision) -> None:
     response.raise_for_status()
 
 
-def fetch_blocklist(config: dict[str, Any]) -> dict[str, str]:
+def fetch_blocklist(config: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
     response = requests.get(
         f"{str(config['server_url']).rstrip('/')}/api/blocklist",
         params={
@@ -117,11 +117,17 @@ def fetch_blocklist(config: dict[str, Any]) -> dict[str, str]:
     )
     response.raise_for_status()
     payload = response.json()
-    return {
+    domains = {
         str(item["domain"]).strip().lower().rstrip("."): str(item["category"]).strip().lower()
         for item in payload.get("blocked_domains", [])
         if item.get("domain") and item.get("category")
     }
+    keywords = [
+        str(item["keyword"]).strip().lower()
+        for item in payload.get("blocked_keywords", [])
+        if item.get("keyword")
+    ]
+    return domains, keywords
 
 
 def is_admin() -> bool:
@@ -494,12 +500,13 @@ class GreenAgentApp:
             return
 
         try:
-            domains = fetch_blocklist(self.config)
+            domains, keywords = fetch_blocklist(self.config)
             self.dns_filter.update_dynamic_domains(domains)
+            self.dns_filter.update_blocked_keywords(keywords)
             self.root.after(
                 0,
-                lambda count=len(domains): self.blocklist_text.set(
-                    f"Admin blocklist loaded: {count} domains"
+                lambda domain_count=len(domains), keyword_count=len(keywords): self.blocklist_text.set(
+                    f"Admin blocklist loaded: {domain_count} domains, {keyword_count} keywords"
                 ),
             )
         except requests.RequestException as exc:

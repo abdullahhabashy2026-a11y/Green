@@ -22,10 +22,31 @@
             <h2>Saved Domains</h2>
             <p class="panel-subtitle">
               Showing page {{ page }} of {{ total_pages }}. Total: {{ blocked_domain_total }} domains.
+              {% if search %} Search: <strong>{{ search }}</strong>.{% endif %}
             </p>
           </div>
           <a class="action-link" href="/">Back</a>
         </div>
+
+        <form class="domain-search-form" method="get" action="/blocked-domains">
+          <label>
+            Search domains
+            <input name="q" placeholder="example.com or keyword" value="{{ search }}">
+          </label>
+          <label>
+            Per page
+            <select name="page_size">
+              {% for size in page_sizes %}
+                <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <input type="hidden" name="page" value="1">
+          <button type="submit">Search</button>
+          {% if search %}
+            <a class="action-link" href="/blocked-domains?page_size={{ page_size }}">Clear</a>
+          {% endif %}
+        </form>
 
         <form class="pager-form" method="get" action="/blocked-domains">
           <label>
@@ -37,12 +58,13 @@
             </select>
           </label>
           <input type="hidden" name="page" value="1">
+          <input type="hidden" name="q" value="{{ search }}">
           <button type="submit">Apply</button>
         </form>
 
         <div class="pager-bar">
           {% if previous_page %}
-            <a class="action-link" href="/blocked-domains?page={{ previous_page }}&page_size={{ page_size }}">Previous</a>
+            <a class="action-link" href="/blocked-domains?page={{ previous_page }}&page_size={{ page_size }}&q={{ search }}">Previous</a>
           {% else %}
             <span class="disabled-link">Previous</span>
           {% endif %}
@@ -50,7 +72,7 @@
           <span class="pager-status">Page {{ page }} / {{ total_pages }}</span>
 
           {% if next_page %}
-            <a class="action-link" href="/blocked-domains?page={{ next_page }}&page_size={{ page_size }}">Next</a>
+            <a class="action-link" href="/blocked-domains?page={{ next_page }}&page_size={{ page_size }}&q={{ search }}">Next</a>
           {% else %}
             <span class="disabled-link">Next</span>
           {% endif %}
@@ -80,7 +102,13 @@
               </tr>
               {% else %}
               <tr>
-                <td class="empty-state" colspan="4">No blocked domains saved yet.</td>
+                <td class="empty-state" colspan="4">
+                  {% if search %}
+                    No blocked domains match this search.
+                  {% else %}
+                    No blocked domains saved yet.
+                  {% endif %}
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -89,7 +117,7 @@
 
         <div class="pager-bar pager-bar-bottom">
           {% if previous_page %}
-            <a class="action-link" href="/blocked-domains?page={{ previous_page }}&page_size={{ page_size }}">Previous</a>
+            <a class="action-link" href="/blocked-domains?page={{ previous_page }}&page_size={{ page_size }}&q={{ search }}">Previous</a>
           {% else %}
             <span class="disabled-link">Previous</span>
           {% endif %}
@@ -97,7 +125,7 @@
           <span class="pager-status">Page {{ page }} / {{ total_pages }}</span>
 
           {% if next_page %}
-            <a class="action-link" href="/blocked-domains?page={{ next_page }}&page_size={{ page_size }}">Next</a>
+            <a class="action-link" href="/blocked-domains?page={{ next_page }}&page_size={{ page_size }}&q={{ search }}">Next</a>
           {% else %}
             <span class="disabled-link">Next</span>
           {% endif %}

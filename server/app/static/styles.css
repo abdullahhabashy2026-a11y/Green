@@ -141,6 +141,8 @@ h2 {
 .device-form,
 .domain-form,
 .bulk-domain-form,
+.domain-search-form,
+.keyword-form,
 .pager-form {
   display: grid;
   gap: 14px;
@@ -160,6 +162,14 @@ h2 {
 
 .pager-form {
   grid-template-columns: minmax(150px, 220px) auto;
+}
+
+.domain-search-form {
+  grid-template-columns: minmax(240px, 1fr) minmax(150px, 220px) auto auto;
+}
+
+.keyword-form {
+  grid-template-columns: minmax(180px, 320px) auto;
 }
 
 .pager-bar {
@@ -257,6 +267,27 @@ button {
   padding: 0 12px;
 }
 
+.danger-button {
+  background: var(--danger);
+}
+
+.action-stack {
+  display: flex;
+  gap: 8px;
+  min-width: 520px;
+  white-space: nowrap;
+}
+
+.inline-rename-form {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.inline-rename-form input {
+  min-height: 34px;
+  width: 150px;
+}
+
 .action-link {
   align-items: center;
   background: var(--ink);
@@ -278,6 +309,10 @@ table {
   border-collapse: collapse;
   min-width: 1120px;
   width: 100%;
+}
+
+.compact-table {
+  min-width: 640px;
 }
 
 th,
@@ -318,6 +353,32 @@ code {
   min-width: 84px;
   padding: 7px 10px;
   text-transform: capitalize;
+}
+
+.dns-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  min-width: 84px;
+  padding: 7px 10px;
+}
+
+.dns-ok {
+  background: var(--active-bg);
+  color: var(--active);
+}
+
+.dns-warning {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.check-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 220px;
 }
 
 .status-active {
@@ -375,6 +436,8 @@ code {
   .device-form,
   .domain-form,
   .bulk-domain-form,
+  .domain-search-form,
+  .keyword-form,
   .pager-form {
     grid-template-columns: 1fr;
   }
