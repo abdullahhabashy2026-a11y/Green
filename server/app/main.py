@@ -3,15 +3,20 @@ from __future__ import annotations
 import sqlite3
 import secrets
 import re
+import base64
+import hashlib
+import hmac
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -27,6 +32,10 @@ ACTIVE_SECONDS = 180
 DELAYED_SECONDS = 600
 BLOCKLIST_FETCH_TIMEOUT_SECONDS = 45
 MAX_BLOCKLIST_DOWNLOAD_BYTES = 25 * 1024 * 1024
+ADMIN_SESSION_COOKIE = "green_admin_session"
+ADMIN_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
+LOCAL_DEV_SECRET_KEY = secrets.token_urlsafe(32)
+POSTGRES_BOOLEAN_COLUMNS = {"vpn_active", "battery_optimization_ignored"}
 
 ALLOWED_BLOCK_CATEGORIES = {"adult", "social", "custom"}
 DEFAULT_REMOTE_BLOCKLISTS = [
@@ -45,6 +54,150 @@ DEFAULT_REMOTE_BLOCKLISTS = [
 app = FastAPI(title="Green Presence Monitor", version=APP_VERSION)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+def get_app_secret_key() -> str:
+    secret_key = os.getenv("APP_SECRET_KEY") or os.getenv("SECRET_KEY")
+    if secret_key:
+        return secret_key
+    return LOCAL_DEV_SECRET_KEY
+
+
+def get_admin_username() -> str:
+    return os.getenv("ADMIN_USERNAME", "admin")
+
+
+def get_admin_password_hash() -> str | None:
+    return os.getenv("ADMIN_PASSWORD_HASH")
+
+
+def get_admin_password() -> str | None:
+    return os.getenv("ADMIN_PASSWORD")
+
+
+def hash_password(password: str, salt: str | None = None, iterations: int = 260_000) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${digest.hex()}"
+
+
+def verify_password_hash(password: str, stored_hash: str) -> bool:
+    parts = stored_hash.split("$")
+    if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
+        return False
+
+    try:
+        iterations = int(parts[1])
+    except ValueError:
+        return False
+
+    salt = parts[2]
+    expected_hash = parts[3]
+    candidate = hash_password(password, salt=salt, iterations=iterations).split("$", 3)[3]
+    return hmac.compare_digest(candidate, expected_hash)
+
+
+def verify_admin_credentials(username: str, password: str) -> bool:
+    if not hmac.compare_digest(username, get_admin_username()):
+        return False
+
+    password_hash = get_admin_password_hash()
+    if password_hash:
+        return verify_password_hash(password, password_hash)
+
+    plain_password = get_admin_password()
+    if plain_password:
+        return hmac.compare_digest(password, plain_password)
+
+    return False
+
+
+def sign_session_payload(payload: str) -> str:
+    signature = hmac.new(get_app_secret_key().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    encoded_payload = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+    return f"{encoded_payload}.{signature}"
+
+
+def read_session_cookie(cookie_value: str | None) -> str | None:
+    if not cookie_value or "." not in cookie_value:
+        return None
+
+    encoded_payload, signature = cookie_value.rsplit(".", 1)
+    try:
+        payload = base64.urlsafe_b64decode(encoded_payload.encode("ascii")).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+    expected_cookie = sign_session_payload(payload)
+    expected_signature = expected_cookie.rsplit(".", 1)[1]
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+
+    username, _, issued_at_raw = payload.partition(":")
+    if username != get_admin_username():
+        return None
+
+    try:
+        issued_at = int(issued_at_raw)
+    except ValueError:
+        return None
+
+    age_seconds = int(now_utc().timestamp()) - issued_at
+    if age_seconds < 0 or age_seconds > ADMIN_SESSION_MAX_AGE_SECONDS:
+        return None
+
+    return username
+
+
+def create_session_cookie(username: str) -> str:
+    payload = f"{username}:{int(now_utc().timestamp())}"
+    return sign_session_payload(payload)
+
+
+def is_admin_request(request: Request) -> bool:
+    return read_session_cookie(request.cookies.get(ADMIN_SESSION_COOKIE)) is not None
+
+
+def admin_password_is_configured() -> bool:
+    return bool(get_admin_password_hash() or get_admin_password())
+
+
+def safe_next_path(next_path: str) -> str:
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        return "/"
+    return next_path
+
+
+def request_wants_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept or "*/*" in accept
+
+
+def is_public_path(path: str) -> bool:
+    if path.startswith("/static/"):
+        return True
+    if path in {"/login", "/health"}:
+        return True
+    agent_api_paths = {
+        "/api/activate",
+        "/api/heartbeat",
+        "/api/domain-event",
+        "/api/domain-check",
+        "/api/blocklist",
+    }
+    return path in agent_api_paths
+
+
+@app.middleware("http")
+async def require_admin_login(request: Request, call_next):
+    path = request.url.path
+    if is_public_path(path) or is_admin_request(request):
+        return await call_next(request)
+
+    if request_wants_html(request):
+        return RedirectResponse(f"/login?next={path}", status_code=303)
+
+    return Response("Admin login required", status_code=401)
 
 
 class HeartbeatPayload(BaseModel):
@@ -103,16 +256,101 @@ def utc_iso(value: datetime | None = None) -> str:
     return (value or now_utc()).isoformat(timespec="seconds")
 
 
-def get_connection() -> sqlite3.Connection:
+def get_database_url() -> str | None:
+    return os.getenv("DATABASE_URL")
+
+
+def is_postgres_url(database_url: str | None) -> bool:
+    return bool(database_url and database_url.startswith(("postgresql://", "postgres://")))
+
+
+def translate_postgres_sql(sql: str) -> str:
+    has_insert_or_ignore = "INSERT OR IGNORE INTO" in sql.upper()
+    translated = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+    translated = translated.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+    translated = translated.replace("?", "%s")
+
+    if has_insert_or_ignore and "ON CONFLICT" not in translated.upper():
+        translated = f"{translated.rstrip()} ON CONFLICT DO NOTHING"
+
+    return translated
+
+
+class PostgresConnection:
+    def __init__(self, database_url: str):
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:
+            raise RuntimeError("PostgreSQL requires psycopg. Run: pip install -r requirements.txt") from exc
+
+        self._psycopg = psycopg
+        if database_url.startswith("postgres://"):
+            database_url = f"postgresql://{database_url.removeprefix('postgres://')}"
+        self._conn = psycopg.connect(database_url, row_factory=dict_row)
+
+    def __enter__(self) -> "PostgresConnection":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+        self._conn.close()
+
+    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> Any:
+        pragma_match = re.fullmatch(r"\s*PRAGMA\s+table_info\((\w+)\)\s*", sql, flags=re.IGNORECASE)
+        if pragma_match:
+            return self._conn.execute(
+                """
+                SELECT column_name AS name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = %s
+                ORDER BY ordinal_position
+                """,
+                (pragma_match.group(1),),
+            )
+
+        try:
+            return self._conn.execute(translate_postgres_sql(sql), params)
+        except self._psycopg.IntegrityError as exc:
+            raise sqlite3.IntegrityError(str(exc)) from exc
+
+    def executemany(self, sql: str, params_seq: list[tuple[Any, ...]]) -> Any:
+        try:
+            cursor = self._conn.cursor()
+            cursor.executemany(translate_postgres_sql(sql), params_seq)
+            return cursor
+        except self._psycopg.IntegrityError as exc:
+            raise sqlite3.IntegrityError(str(exc)) from exc
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+
+def get_connection() -> sqlite3.Connection | PostgresConnection:
+    database_url = get_database_url()
+    if is_postgres_url(database_url):
+        return PostgresConnection(database_url or "")
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+def ensure_column(conn: sqlite3.Connection | PostgresConnection, table: str, column: str, definition: str) -> None:
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
+        if isinstance(conn, PostgresConnection) and column in POSTGRES_BOOLEAN_COLUMNS:
+            definition = "BOOLEAN"
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
@@ -707,6 +945,74 @@ def generate_device_id() -> str:
 
 def generate_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"ok": "true"}
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/") -> HTMLResponse:
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "next": safe_next_path(next),
+            "error": None,
+            "password_configured": admin_password_is_configured(),
+        },
+    )
+
+
+@app.post("/login")
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+) -> Response:
+    safe_next = safe_next_path(next)
+    if not admin_password_is_configured():
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "next": safe_next,
+                "error": "Admin password is not configured on the server.",
+                "password_configured": False,
+            },
+            status_code=503,
+        )
+
+    if not verify_admin_credentials(username.strip(), password):
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "next": safe_next,
+                "error": "Invalid username or password.",
+                "password_configured": True,
+            },
+            status_code=401,
+        )
+
+    response = RedirectResponse(safe_next, status_code=303)
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        create_session_cookie(username.strip()),
+        max_age=ADMIN_SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@app.post("/logout")
+def logout() -> RedirectResponse:
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(ADMIN_SESSION_COOKIE)
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)

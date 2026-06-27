@@ -13,7 +13,12 @@
           <p class="eyebrow">Green v0.1</p>
           <h1>Blocked Domains</h1>
         </div>
-        <div class="timestamp">Updated {{ generated_at }}</div>
+        <div class="topbar-actions">
+          <div class="timestamp">Updated {{ generated_at }}</div>
+          <form method="post" action="/logout">
+            <button class="small-button" type="submit">Logout</button>
+          </form>
+        </div>
       </header>
 
       <section class="panel">

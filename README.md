@@ -25,6 +25,9 @@ cd "E:\HABASHY\Python Codes\Green\server"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+$env:ADMIN_USERNAME="admin"
+$env:ADMIN_PASSWORD="change-this-local-password"
+$env:APP_SECRET_KEY="change-this-to-a-long-random-secret"
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -33,6 +36,59 @@ Open:
 ```text
 http://127.0.0.1:8000
 ```
+
+The dashboard is protected by a single admin login. For production, use `ADMIN_PASSWORD_HASH`
+instead of `ADMIN_PASSWORD`. Generate a hash with:
+
+```powershell
+python -c "from app.main import hash_password; import getpass; print(hash_password(getpass.getpass()))"
+```
+
+See `server/.env.example` for the production environment variables. Do not commit a real `.env`
+file or real secrets.
+
+SQLite remains the local default. For production PostgreSQL, set:
+
+```powershell
+$env:DATABASE_URL="postgresql://green_user:password@host:5432/green"
+```
+
+### Render prototype deployment
+
+For a quick shared prototype:
+
+1. Push this repository to GitHub.
+2. In Render, create a managed PostgreSQL database.
+3. Create a Web Service from the GitHub repository.
+4. Use Docker as the runtime.
+5. Set the Dockerfile path to:
+
+```text
+server/Dockerfile
+```
+
+6. Set the Docker build context directory to:
+
+```text
+server
+```
+
+7. Add these environment variables in Render:
+
+```text
+DATABASE_URL=<Render PostgreSQL internal database URL>
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=<generated password hash>
+APP_SECRET_KEY=<long random secret>
+```
+
+8. Set the Health Check Path to:
+
+```text
+/health
+```
+
+9. Open the Render service URL and log in to the dashboard.
 
 On first run, if `server/data/green.db` does not exist or has no blocked domains, the server imports starter lists from:
 

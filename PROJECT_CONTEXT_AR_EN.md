@@ -38,6 +38,7 @@ E:\HABASHY\Python Codes\Green
 ```
 
 - `server`: سيرفر FastAPI + قاعدة SQLite + داشبورد.
+- `server/Dockerfile`: تجهيز بسيط لرفع السيرفر كتطبيق Docker على Render.
 - `agent-windows`: Windows Agent + DNS filter + سكربتات البناء والطوارئ.
 - `agent-android`: نموذج Android أولي Native Kotlin يستخدم VPNService لحجب DNS.
 - `PROJECT_CONTEXT_AR_EN.md`: ملف التوثيق الحالي بالعربية والإنجليزية.
@@ -46,15 +47,16 @@ E:\HABASHY\Python Codes\Green
 ### تدفق الاستخدام الحالي
 
 1. الأدمن يشغل السيرفر ويفتح الداشبورد.
-2. الأدمن يضيف اسم المتعافي.
-3. السيرفر يولد `Device ID` و`Activation Token`.
-4. المتعافي يفتح `GreenAgent.exe`.
-5. المتعافي يدخل أو يلصق `Activation Token` ويضغط `Activate`.
-6. الـ Agent يحفظ بياناته في `%APPDATA%\Green\agent.config.json`.
-7. الـ Agent يرسل heartbeat كل 60 ثانية.
-8. الأدمن يرى حالة الجهاز في الداشبورد.
-9. لتفعيل المنع، يتم الضغط على `Start Blocking` داخل الـ Agent.
-10. الـ Agent يشغل DNS filter محلي ويبدأ تسجيل/منع الدومينات.
+2. الأدمن يسجل الدخول بحساب أدمن واحد قبل عرض الأجهزة أو التوكنات.
+3. الأدمن يضيف اسم المتعافي.
+4. السيرفر يولد `Device ID` و`Activation Token`.
+5. المتعافي يفتح `GreenAgent.exe`.
+6. المتعافي يدخل أو يلصق `Activation Token` ويضغط `Activate`.
+7. الـ Agent يحفظ بياناته في `%APPDATA%\Green\agent.config.json`.
+8. الـ Agent يرسل heartbeat كل 60 ثانية.
+9. الأدمن يرى حالة الجهاز في الداشبورد.
+10. لتفعيل المنع، يتم الضغط على `Start Blocking` داخل الـ Agent.
+11. الـ Agent يشغل DNS filter محلي ويبدأ تسجيل/منع الدومينات.
 
 ### حالات الجهاز في الداشبورد
 
@@ -69,8 +71,9 @@ E:\HABASHY\Python Codes\Green
 #### Presence Monitor
 
 - سيرفر FastAPI محلي.
-- قاعدة بيانات SQLite.
-- Dashboard ملون وبسيط.
+- قاعدة بيانات SQLite محليا، مع دعم PostgreSQL عند ضبط `DATABASE_URL`.
+- Dashboard ملون وبسيط ومحمي بـ admin login.
+- إعدادات السيرفر من متغيرات البيئة: `ADMIN_USERNAME`, و`ADMIN_PASSWORD_HASH` للإنتاج، أو `ADMIN_PASSWORD` للتجربة المحلية، و`APP_SECRET_KEY` لتوقيع الجلسة، و`DATABASE_URL` لتفعيل PostgreSQL.
 - تسجيل أجهزة من اسم المتعافي فقط.
 - توليد `Device ID` و`Activation Token` تلقائيا.
 - تفعيل Agent بتوكن واحد.
@@ -363,7 +366,7 @@ cd "E:\HABASHY\Python Codes\Green\agent-windows"
 - بعد إضافة دومينات جديدة قد تحتاج إلى `ipconfig /flushdns` أو إغلاق المتصفح وإعادة فتحه.
 - القوائم في الداشبورد لا تؤثر إلا عندما يكون الـ Agent في حالة `Start Blocking`.
 - إذا توقف الإنترنت، استخدم `Restore Internet DNS` أو `Restore-DNS.ps1`.
-- السيرفر ما زال بدون Login.
+- الداشبورد أصبحت محمية بـ Login لأدمن واحد.
 - لا يوجد Windows Service بعد.
 - لا يوجد Installer بعد.
 - لا توجد حماية ضد حذف البرنامج بعد.
@@ -409,15 +412,17 @@ http://10.0.2.2:8000
 
 ### الخطوات القادمة المقترحة
 
-1. إضافة Login للأدمن.
-2. إضافة تحديث تلقائي مجدول لقوائم `Remote Blocklists` كل 24 ساعة.
-3. تقليل تسجيل `allowed` أو جعله اختياريا لتقليل الضوضاء.
-4. كشف أو تعطيل Secure DNS / DoH في المتصفحات.
-5. تحويل Agent إلى Windows Service.
-6. عمل Installer.
-7. رفع السيرفر أونلاين.
-8. إضافة AI classification للدومينات غير المعروفة.
-9. دعم Android وiOS لاحقا بطرق مناسبة لكل نظام.
+1. اختبار السيرفر Dockerized على Render.
+2. اختبار PostgreSQL على cloud managed database.
+3. إضافة Alembic migrations.
+4. إضافة تحديث تلقائي مجدول لقوائم `Remote Blocklists` كل 24 ساعة.
+5. تقليل تسجيل `allowed` أو جعله اختياريا لتقليل الضوضاء.
+6. كشف أو تعطيل Secure DNS / DoH في المتصفحات.
+7. تحويل Agent إلى Windows Service.
+8. عمل Installer.
+9. رفع السيرفر أونلاين.
+10. إضافة AI classification للدومينات غير المعروفة.
+11. دعم Android وiOS لاحقا بطرق مناسبة لكل نظام.
 
 ---
 
@@ -452,7 +457,8 @@ This phase marks a working Windows version for blocking known adult websites usi
 E:\HABASHY\Python Codes\Green
 ```
 
-- `server`: FastAPI + SQLite + Dashboard.
+- `server`: FastAPI + SQLite/PostgreSQL + Dashboard.
+- `server/Dockerfile`: simple Docker packaging for Render prototype deployment.
 - `agent-windows`: Windows Agent + DNS filter + build/emergency scripts.
 - `agent-android`: initial native Kotlin Android prototype using VPNService DNS filtering.
 - `PROJECT_CONTEXT_AR_EN.md`: current bilingual documentation.
@@ -484,7 +490,7 @@ E:\HABASHY\Python Codes\Green
 #### Presence Monitor
 
 - Local FastAPI server.
-- SQLite database.
+- SQLite database locally, with PostgreSQL support when `DATABASE_URL` is set.
 - Color-based dashboard.
 - Device registration by recovery name only.
 - Automatic `Device ID` and `Activation Token` generation.
@@ -778,7 +784,7 @@ cd "E:\HABASHY\Python Codes\Green\agent-windows"
 - After adding domains, `ipconfig /flushdns` or browser restart may be needed.
 - Dashboard lists only affect devices while `Start Blocking` is active.
 - If internet breaks, use `Restore Internet DNS` or `Restore-DNS.ps1`.
-- No admin login yet.
+- Dashboard is now protected by a single admin login.
 - No Windows Service yet.
 - No installer yet.
 - No anti-uninstall/tamper protection yet.
@@ -824,12 +830,14 @@ http://10.0.2.2:8000
 
 ### Suggested Next Steps
 
-1. Add admin login.
-2. Add automatic scheduled updates for `Remote Blocklists` every 24 hours.
-3. Reduce or make optional `allowed` domain logging.
-4. Detect or disable browser Secure DNS / DoH.
-5. Convert Agent to Windows Service.
-6. Create installer.
-7. Deploy server online.
-8. Add AI classification for unknown domains.
-9. Later support Android and iOS with OS-appropriate methods.
+1. Test the Dockerized server on Render.
+2. Test PostgreSQL on a managed cloud database.
+3. Add Alembic migrations.
+4. Add automatic scheduled updates for `Remote Blocklists` every 24 hours.
+5. Reduce or make optional `allowed` domain logging.
+6. Detect or disable browser Secure DNS / DoH.
+7. Convert Agent to Windows Service.
+8. Create installer.
+9. Deploy server online.
+10. Add AI classification for unknown domains.
+11. Later support Android and iOS with OS-appropriate methods.

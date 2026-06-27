@@ -9,6 +9,8 @@ venv/
 env/
 
 # Local runtime data
+.env
+server/.env
 server/data/
 agent-windows/agent.config.json
 agent-windows/*.local.json

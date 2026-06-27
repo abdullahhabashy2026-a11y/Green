@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Green Admin Login</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="login-shell">
+      <section class="login-panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Green Admin</p>
+          <h1>Login</h1>
+        </div>
+
+        {% if error %}
+          <div class="login-error">{{ error }}</div>
+        {% endif %}
+
+        {% if not password_configured and not error %}
+          <div class="login-error">
+            Set ADMIN_PASSWORD_HASH or ADMIN_PASSWORD before opening the dashboard.
+          </div>
+        {% endif %}
+
+        <form class="login-form" method="post" action="/login">
+          <input type="hidden" name="next" value="{{ next }}">
+          <label>
+            Username
+            <input name="username" autocomplete="username" required autofocus>
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button type="submit">Login</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>
