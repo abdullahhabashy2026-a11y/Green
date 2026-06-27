@@ -17,8 +17,12 @@ agent-windows/*.local.json
 
 # Build caches and temporary output
 .gradle/
+tools/
 agent-windows/build/
 agent-windows/dist/*/
+agent-windows/dist/GreenAgentIPv6.exe
+agent-windows/dist/GreenAgentTunnel.exe
+agent-windows/dist/GreenAgentTunnelPaste.exe
 agent-android/.gradle/
 agent-android/build/
 build/

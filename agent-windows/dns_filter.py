@@ -168,13 +168,14 @@ class DNSFilterServer:
         self.blocked_keywords: set[str] = set()
         self._dynamic_domains_lock = threading.Lock()
         self._blocked_keywords_lock = threading.Lock()
-        self._server: socketserver.ThreadingUDPServer | None = None
+        self._servers: list[socketserver.ThreadingUDPServer] = []
         self._thread: threading.Thread | None = None
+        self._threads: list[threading.Thread] = []
         self._last_logged: dict[tuple[str, str], float] = {}
 
     @property
     def is_running(self) -> bool:
-        return bool(self._server and self._thread and self._thread.is_alive())
+        return any(thread.is_alive() for thread in self._threads)
 
     def start(self) -> None:
         if self.is_running:
@@ -189,15 +190,35 @@ class DNSFilterServer:
                 client_socket.sendto(response, self.client_address)
 
         socketserver.ThreadingUDPServer.allow_reuse_address = True
-        self._server = socketserver.ThreadingUDPServer(("127.0.0.1", 53), DNSHandler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
+
+        class IPv6ThreadingUDPServer(socketserver.ThreadingUDPServer):
+            address_family = socket.AF_INET6
+
+        bind_targets: list[tuple[type[socketserver.ThreadingUDPServer], tuple[str, int]]] = [
+            (socketserver.ThreadingUDPServer, ("127.0.0.1", 53)),
+            (IPv6ThreadingUDPServer, ("::1", 53)),
+        ]
+        last_error: Exception | None = None
+
+        for server_class, bind_address in bind_targets:
+            try:
+                server = server_class(bind_address, DNSHandler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                self._servers.append(server)
+                self._threads.append(thread)
+            except Exception as exc:
+                last_error = exc
+
+        if not self._servers:
+            raise RuntimeError(f"Could not start DNS filter: {last_error}")
 
     def stop(self) -> None:
-        if self._server:
-            self._server.shutdown()
-            self._server.server_close()
-        self._server = None
+        for server in self._servers:
+            server.shutdown()
+            server.server_close()
+        self._servers = []
+        self._threads = []
         self._thread = None
 
     def update_dynamic_domains(self, domains: dict[str, str]) -> None:

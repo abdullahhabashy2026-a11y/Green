@@ -19,7 +19,8 @@ from PIL import Image, ImageDraw
 
 
 APP_VERSION = "0.1.0"
-DEFAULT_SERVER_URL = "https://green-5xdl.onrender.com"
+BUILD_NAME = "GreenAgentIPv6Fix"
+DEFAULT_SERVER_URL = "https://clinton-immediate-submissions-souls.trycloudflare.com"
 DEFAULT_INTERVAL_SECONDS = 60
 BLOCKLIST_REFRESH_SECONDS = 300
 DOMAIN_CHECK_CACHE_SECONDS = 600
@@ -210,10 +211,10 @@ def active_dns_interfaces() -> list[str]:
     return [str(item) for item in as_list(result) if str(item).strip()]
 
 
-def current_dns_servers(interface_alias: str) -> list[str]:
+def current_dns_servers(interface_alias: str, address_family: str = "IPv4") -> list[str]:
     result = powershell_json(
         f"(Get-DnsClientServerAddress -InterfaceAlias {quote_ps(interface_alias)} "
-        "-AddressFamily IPv4).ServerAddresses"
+        f"-AddressFamily {address_family}).ServerAddresses"
     )
     return [str(item) for item in as_list(result) if str(item).strip()]
 
@@ -234,10 +235,20 @@ def set_interface_dns(interface_alias: str, servers: list[str]) -> None:
 
 
 def restore_dns_from_config(config: dict[str, Any]) -> None:
-    previous_dns = config.get("dns_previous", {})
-    if previous_dns:
-        for interface, servers in previous_dns.items():
-            set_interface_dns(str(interface), [str(server) for server in servers])
+    previous_dns_v4 = config.get("dns_previous_v4") or config.get("dns_previous", {})
+    previous_dns_v6 = config.get("dns_previous_v6", {})
+    if previous_dns_v4 or previous_dns_v6:
+        interfaces = set(previous_dns_v4) | set(previous_dns_v6)
+        for interface in interfaces:
+            servers = [
+                str(server)
+                for server in [
+                    *previous_dns_v4.get(interface, []),
+                    *previous_dns_v6.get(interface, []),
+                ]
+                if str(server).strip()
+            ]
+            set_interface_dns(str(interface), servers)
         return
 
     for interface in active_dns_interfaces():
@@ -295,7 +306,7 @@ class GreenAgentApp:
         return bool(self.config.get("device_id") and self.config.get("token"))
 
     def build_ui(self) -> None:
-        self.root.title("Green Agent")
+        self.root.title(f"Green Agent - {BUILD_NAME}")
         self.root.geometry("540x660")
         self.root.minsize(460, 620)
 
@@ -320,7 +331,7 @@ class GreenAgentApp:
         frame.bind("<Configure>", update_scroll_region)
         canvas.bind("<Configure>", update_frame_width)
 
-        title = ttk.Label(frame, text="Green Agent", font=("Segoe UI", 20, "bold"))
+        title = ttk.Label(frame, text=f"Green Agent - {BUILD_NAME}", font=("Segoe UI", 20, "bold"))
         title.pack(anchor="w")
 
         subtitle = ttk.Label(frame, text="Activate this computer with the token from your admin.")
@@ -328,8 +339,15 @@ class GreenAgentApp:
 
         server_label = ttk.Label(frame, text="Server URL")
         server_label.pack(anchor="w")
-        server_entry = ttk.Entry(frame, textvariable=self.server_url, state="readonly")
-        server_entry.pack(fill="x", pady=(4, 10))
+        server_row = ttk.Frame(frame)
+        server_row.pack(fill="x", pady=(4, 10))
+        self.server_entry = ttk.Entry(server_row, textvariable=self.server_url)
+        self.server_entry.pack(side="left", fill="x", expand=True)
+        self.server_entry.bind("<Control-v>", self.paste_server_url)
+        self.server_entry.bind("<Control-V>", self.paste_server_url)
+        self.server_entry.bind("<Shift-Insert>", self.paste_server_url)
+        server_paste_button = ttk.Button(server_row, text="Paste", command=self.paste_server_url)
+        server_paste_button.pack(side="left", padx=(8, 0))
 
         token_label = ttk.Label(frame, text="Activation Token")
         token_label.pack(anchor="w")
@@ -383,7 +401,7 @@ class GreenAgentApp:
         self.exit_button.pack(anchor="w", pady=(14, 0))
 
         if self.is_activated:
-            self.activate_button.configure(state="disabled")
+            self.activate_button.configure(state="normal")
         else:
             self.exit_button.configure(state="disabled")
             self.start_blocking_button.configure(state="disabled")
@@ -439,6 +457,18 @@ class GreenAgentApp:
         if clipboard_text:
             self.activation_token.set(clipboard_text)
             self.token_entry.icursor("end")
+
+        return "break"
+
+    def paste_server_url(self, event: tk.Event | None = None) -> str:
+        try:
+            clipboard_text = self.root.clipboard_get().strip()
+        except tk.TclError:
+            return "break"
+
+        if clipboard_text:
+            self.server_url.set(clipboard_text.rstrip("/"))
+            self.server_entry.icursor("end")
 
         return "break"
 
@@ -666,15 +696,19 @@ class GreenAgentApp:
             if not interfaces:
                 raise RuntimeError("No active network interfaces found.")
 
-            previous_dns: dict[str, list[str]] = {}
+            previous_dns_v4: dict[str, list[str]] = {}
+            previous_dns_v6: dict[str, list[str]] = {}
             for interface in interfaces:
-                previous_dns[interface] = current_dns_servers(interface)
+                previous_dns_v4[interface] = current_dns_servers(interface, address_family="IPv4")
+                previous_dns_v6[interface] = current_dns_servers(interface, address_family="IPv6")
 
-            self.config["dns_previous"] = previous_dns
+            self.config["dns_previous_v4"] = previous_dns_v4
+            self.config["dns_previous_v6"] = previous_dns_v6
+            self.config.pop("dns_previous", None)
             self.config["protection_enabled"] = False
             save_config(self.config)
 
-            upstream_servers = flatten_dns_servers(previous_dns)
+            upstream_servers = flatten_dns_servers(previous_dns_v4)
             if not self.dns_filter:
                 self.dns_filter = DNSFilterServer(
                     self.record_domain_event,
@@ -686,7 +720,7 @@ class GreenAgentApp:
             self.start_blocklist_refresh_loop()
 
             for interface in interfaces:
-                set_interface_dns(interface, ["127.0.0.1"])
+                set_interface_dns(interface, ["127.0.0.1", "::1"])
                 changed_interfaces.append(interface)
 
             self.config["protection_enabled"] = True
