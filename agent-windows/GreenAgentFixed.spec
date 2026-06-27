@@ -5,7 +5,10 @@ a = Analysis(
     ['agent_gui.pyw'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('..\\server\\blocklists\\adult.txt', 'blocklists'),
+        ('..\\server\\blocklists\\custom.txt', 'blocklists'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

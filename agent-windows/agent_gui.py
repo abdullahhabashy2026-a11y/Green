@@ -3,8 +3,10 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -20,11 +22,13 @@ from PIL import Image, ImageDraw
 
 APP_VERSION = "0.1.0"
 BUILD_NAME = "GreenAgentIPv6Fix"
-DEFAULT_SERVER_URL = "https://clinton-immediate-submissions-souls.trycloudflare.com"
+DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_INTERVAL_SECONDS = 60
 BLOCKLIST_REFRESH_SECONDS = 300
 DOMAIN_CHECK_CACHE_SECONDS = 600
-LOCAL_SERVER_URLS = {"http://127.0.0.1:8000", "http://localhost:8000"}
+LOCAL_BLOCKLIST_CATEGORIES = ("adult", "social", "custom")
+LOCAL_BLOCKLIST_CACHE: tuple[dict[str, str], list[str]] | None = None
+PROTECTED_BLOCKLIST_PERMISSIONS_APPLIED = False
 
 
 def config_path() -> Path:
@@ -49,8 +53,6 @@ def load_config() -> dict[str, Any]:
         config = json.load(config_file)
 
     config.setdefault("server_url", DEFAULT_SERVER_URL)
-    if str(config.get("server_url", "")).rstrip("/") in LOCAL_SERVER_URLS:
-        config["server_url"] = DEFAULT_SERVER_URL
     config.setdefault("interval_seconds", DEFAULT_INTERVAL_SECONDS)
     return config
 
@@ -58,6 +60,183 @@ def load_config() -> dict[str, Any]:
 def save_config(config: dict[str, Any]) -> None:
     with config_path().open("w", encoding="utf-8") as config_file:
         json.dump(config, config_file, indent=2)
+
+
+def resource_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent
+
+
+def protected_blocklist_dir() -> Path | None:
+    program_data = os.getenv("PROGRAMDATA")
+    if not program_data:
+        return None
+    return Path(program_data) / "Green" / "blocklists"
+
+
+def bundled_blocklist_dir() -> Path:
+    return resource_dir() / "blocklists"
+
+
+def development_blocklist_dir() -> Path:
+    return resource_dir().parent / "server" / "blocklists"
+
+
+def bundled_blocklist_paths() -> list[tuple[Path, str]]:
+    paths: list[tuple[Path, str]] = []
+    for blocklist_dir in (bundled_blocklist_dir(), development_blocklist_dir()):
+        for category in LOCAL_BLOCKLIST_CATEGORIES:
+            path = blocklist_dir / f"{category}.txt"
+            if path.exists() and (path, category) not in paths:
+                paths.append((path, category))
+        if paths:
+            return paths
+    return paths
+
+
+def apply_protected_blocklist_permissions(blocklist_dir: Path) -> None:
+    global PROTECTED_BLOCKLIST_PERMISSIONS_APPLIED
+    if PROTECTED_BLOCKLIST_PERMISSIONS_APPLIED or os.name != "nt":
+        return
+
+    try:
+        subprocess.run(
+            [
+                "icacls",
+                str(blocklist_dir),
+                "/inheritance:r",
+                "/grant:r",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+                "*S-1-5-32-545:(OI)(CI)RX",
+                "/C",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
+        )
+        for blocklist_file in blocklist_dir.glob("*.txt"):
+            subprocess.run(
+                [
+                    "icacls",
+                    str(blocklist_file),
+                    "/inheritance:r",
+                    "/grant:r",
+                    "*S-1-5-18:F",
+                    "*S-1-5-32-544:F",
+                    "*S-1-5-32-545:R",
+                    "/C",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=True,
+            )
+        PROTECTED_BLOCKLIST_PERMISSIONS_APPLIED = True
+    except Exception:
+        pass
+
+
+def ensure_protected_blocklists() -> Path | None:
+    blocklist_dir = protected_blocklist_dir()
+    if blocklist_dir is None:
+        return None
+
+    source_paths = bundled_blocklist_paths()
+    if not source_paths:
+        return blocklist_dir if blocklist_dir.exists() else None
+
+    try:
+        blocklist_dir.mkdir(parents=True, exist_ok=True)
+        for source_path, category in source_paths:
+            target_path = blocklist_dir / f"{category}.txt"
+            should_copy = not target_path.exists()
+            if not should_copy:
+                try:
+                    should_copy = target_path.stat().st_size != source_path.stat().st_size
+                except OSError:
+                    should_copy = True
+            if should_copy:
+                shutil.copyfile(source_path, target_path)
+
+        apply_protected_blocklist_permissions(blocklist_dir)
+        return blocklist_dir
+    except OSError:
+        return None
+
+
+def normalize_local_domain(domain: str) -> str:
+    value = domain.strip().lower().rstrip(".")
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    value = value.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    if value.startswith("www."):
+        value = value[4:]
+    return value
+
+
+def is_local_domain(value: str) -> bool:
+    if not value or len(value) > 255 or "." not in value:
+        return False
+    labels = value.split(".")
+    return all(label and all(char.isalnum() or char == "-" for char in label) for label in labels)
+
+
+def local_blocklist_paths() -> list[tuple[Path, str]]:
+    protected_dir = ensure_protected_blocklists()
+    candidate_dirs = [protected_dir] if protected_dir is not None else []
+    candidate_dirs.extend([bundled_blocklist_dir(), development_blocklist_dir()])
+
+    paths: list[tuple[Path, str]] = []
+    for blocklist_dir in candidate_dirs:
+        for category in LOCAL_BLOCKLIST_CATEGORIES:
+            path = blocklist_dir / f"{category}.txt"
+            if path.exists() and (path, category) not in paths:
+                paths.append((path, category))
+    return paths
+
+
+def parse_local_blocklist_line(line: str) -> str:
+    value = line.strip()
+    if not value or value.startswith(("#", "!", "[", "@@")):
+        return ""
+
+    if value.startswith("||"):
+        value = value[2:].split("^", 1)[0].split("$", 1)[0]
+    elif value.startswith("|"):
+        value = value.lstrip("|").split("^", 1)[0].split("$", 1)[0]
+    else:
+        parts = [part for part in value.replace("\t", " ").split(" ") if part]
+        if len(parts) >= 2 and parts[0] in {"0.0.0.0", "127.0.0.1", "::", "::1"}:
+            value = parts[1]
+        elif parts:
+            value = parts[0]
+
+    if value.startswith("*."):
+        value = value[2:]
+    return normalize_local_domain(value.strip().strip("|").strip("^"))
+
+
+def load_local_blocklist() -> tuple[dict[str, str], list[str]]:
+    global LOCAL_BLOCKLIST_CACHE
+    if LOCAL_BLOCKLIST_CACHE is not None:
+        return LOCAL_BLOCKLIST_CACHE
+
+    domains: dict[str, str] = {}
+    for path, category in local_blocklist_paths():
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as blocklist_file:
+                for line in blocklist_file:
+                    domain = parse_local_blocklist_line(line)
+                    if is_local_domain(domain):
+                        domains[domain] = category
+        except OSError:
+            continue
+
+    LOCAL_BLOCKLIST_CACHE = (domains, [])
+    return LOCAL_BLOCKLIST_CACHE
 
 
 def device_metadata() -> dict[str, str]:
@@ -602,18 +781,24 @@ class GreenAgentApp:
 
         try:
             domains, keywords = fetch_blocklist(self.config)
+            source_label = "Admin blocklist loaded"
+        except requests.RequestException:
+            domains, keywords = load_local_blocklist()
+            source_label = "Local fallback blocklist loaded"
+
+        if domains or keywords:
             self.dns_filter.update_dynamic_domains(domains)
             self.dns_filter.update_blocked_keywords(keywords)
             self.root.after(
                 0,
-                lambda domain_count=len(domains), keyword_count=len(keywords): self.blocklist_text.set(
-                    f"Admin blocklist loaded: {domain_count} domains, {keyword_count} keywords"
+                lambda label=source_label, domain_count=len(domains), keyword_count=len(keywords): self.blocklist_text.set(
+                    f"{label}: {domain_count} domains, {keyword_count} keywords"
                 ),
             )
-        except requests.RequestException as exc:
+        else:
             self.root.after(
                 0,
-                lambda error=str(exc): self.blocklist_text.set("Using server domain-check fallback"),
+                lambda: self.blocklist_text.set("Using server domain-check fallback"),
             )
 
     def start_blocklist_refresh_loop(self) -> None:

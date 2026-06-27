@@ -17,8 +17,14 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     --onefile `
     --windowed `
     --uac-admin `
+    --add-data "..\server\blocklists\adult.txt;blocklists" `
+    --add-data "..\server\blocklists\custom.txt;blocklists" `
     --name GreenAgent `
     agent_gui.pyw
+
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed. Close any running GreenAgent.exe window/tray process, then run this build script again."
+}
 
 Write-Host ""
 Write-Host "Build complete:"
