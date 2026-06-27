@@ -158,9 +158,11 @@ class DNSFilterServer:
     def __init__(
         self,
         event_callback: Callable[[DomainDecision], None],
+        policy_callback: Callable[[str], DomainDecision | None] | None = None,
         upstream_servers: list[str] | None = None,
     ) -> None:
         self.event_callback = event_callback
+        self.policy_callback = policy_callback
         self.upstream_servers = upstream_servers or list(FALLBACK_UPSTREAM_DNS)
         self.dynamic_domains: dict[str, str] = {}
         self.blocked_keywords: set[str] = set()
@@ -235,6 +237,15 @@ class DNSFilterServer:
                 dynamic_domains=self.get_dynamic_domains(),
                 blocked_keywords=self.get_blocked_keywords(),
             )
+            if (
+                decision.decision == "allowed"
+                and decision.category == "unknown"
+                and self.policy_callback is not None
+            ):
+                server_decision = self.policy_callback(qname)
+                if server_decision is not None:
+                    decision = server_decision
+
             self.log_decision(decision)
 
             if decision.decision == "blocked":

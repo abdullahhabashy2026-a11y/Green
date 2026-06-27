@@ -22,6 +22,7 @@ APP_VERSION = "0.1.0"
 DEFAULT_SERVER_URL = "https://green-5xdl.onrender.com"
 DEFAULT_INTERVAL_SECONDS = 60
 BLOCKLIST_REFRESH_SECONDS = 300
+DOMAIN_CHECK_CACHE_SECONDS = 600
 LOCAL_SERVER_URLS = {"http://127.0.0.1:8000", "http://localhost:8000"}
 
 
@@ -131,6 +132,26 @@ def fetch_blocklist(config: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
         if item.get("keyword")
     ]
     return domains, keywords
+
+
+def check_domain_policy(config: dict[str, Any], domain: str) -> DomainDecision | None:
+    response = requests.post(
+        f"{str(config['server_url']).rstrip('/')}/api/domain-check",
+        json={
+            "device_id": config["device_id"],
+            "token": config["token"],
+            "domain": domain,
+        },
+        timeout=3,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return DomainDecision(
+        domain=str(payload.get("domain") or domain).strip().lower().rstrip("."),
+        category=str(payload.get("category") or "unknown"),
+        decision=str(payload.get("decision") or "allowed"),
+        reason=str(payload.get("reason") or "Server domain check"),
+    )
 
 
 def is_admin() -> bool:
@@ -243,6 +264,7 @@ class GreenAgentApp:
         self.tray_icon: pystray.Icon | None = None
         self.tray_thread: threading.Thread | None = None
         self.dns_filter: DNSFilterServer | None = None
+        self.domain_check_cache: dict[str, tuple[DomainDecision | None, float]] = {}
         self.hide_notice_shown = False
 
         self.server_url = tk.StringVar(value=str(self.config.get("server_url", DEFAULT_SERVER_URL)))
@@ -529,6 +551,21 @@ class GreenAgentApp:
         except requests.RequestException:
             pass
 
+    def check_domain_policy_cached(self, domain: str) -> DomainDecision | None:
+        normalized = domain.strip().lower().rstrip(".")
+        cached = self.domain_check_cache.get(normalized)
+        now = time.time()
+        if cached and now - cached[1] < DOMAIN_CHECK_CACHE_SECONDS:
+            return cached[0]
+
+        try:
+            decision = check_domain_policy(self.config, normalized)
+        except requests.RequestException:
+            decision = None
+
+        self.domain_check_cache[normalized] = (decision, now)
+        return decision
+
     def refresh_blocklist_once(self) -> None:
         if not self.dns_filter or not self.is_activated:
             return
@@ -546,7 +583,7 @@ class GreenAgentApp:
         except requests.RequestException as exc:
             self.root.after(
                 0,
-                lambda error=str(exc): self.blocklist_text.set(f"Blocklist refresh failed"),
+                lambda error=str(exc): self.blocklist_text.set("Using server domain-check fallback"),
             )
 
     def start_blocklist_refresh_loop(self) -> None:
@@ -641,6 +678,7 @@ class GreenAgentApp:
             if not self.dns_filter:
                 self.dns_filter = DNSFilterServer(
                     self.record_domain_event,
+                    policy_callback=self.check_domain_policy_cached,
                     upstream_servers=upstream_servers,
                 )
             self.dns_filter.start()
