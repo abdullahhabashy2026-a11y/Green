@@ -8,6 +8,14 @@ This document records the current project state so development can continue late
 
 ## العربية
 
+### المرحلة الحالية
+
+```text
+windows-dns-local-proof-of-concept
+```
+
+هذه المرحلة تثبت مسار Windows المحلي: داشبورد للأدمن، تفعيل Agent بالتوكن، heartbeat كل 60 ثانية، حجب DNS، قوائم حجب Adult يتم تحديثها/استيرادها، حماية استرجاع DNS، وتحسين مبدئي لتقليل الحجب الخاطئ عبر Allowlist داخل الـ Agent.
+
 ### الهدف العام
 
 مشروع `Green` هو نظام مبدئي لمتابعة وحماية أجهزة Windows. الهدف النهائي هو منع تصفح المواقع الإباحية ومواقع التواصل الاجتماعي على أجهزة الكمبيوتر والموبايل. النسخة الحالية تثبت وجود الـ Agent على الجهاز، ترسل حالة الجهاز للداشبورد، وتنفذ منع مواقع تجريبي على مستوى DNS.
@@ -375,6 +383,14 @@ cd "E:\HABASHY\Python Codes\Green\agent-windows"
 ---
 
 ## English
+
+### Current Phase
+
+```text
+windows-dns-local-proof-of-concept
+```
+
+This phase proves the local Windows workflow: admin dashboard, token-based Agent activation, 60-second presence heartbeat, DNS-level blocking, imported/updated adult blocklists, DNS restore safety, and basic false-positive reduction through an Agent allowlist.
 
 ### General Goal
 

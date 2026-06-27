@@ -2,6 +2,12 @@
 
 Green v0.1 is a local proof of concept for monitoring whether a Windows agent is installed and running.
 
+## Current Phase
+
+**Phase:** `windows-dns-local-proof-of-concept`
+
+This phase proves the Windows local workflow: admin dashboard, token-based Agent activation, 60-second presence heartbeat, DNS-level blocking, remote adult blocklists, DNS restore safety, and basic false-positive protection through an Agent allowlist.
+
 ## Components
 
 - `server`: FastAPI backend, SQLite database, and a simple color-based admin dashboard.
