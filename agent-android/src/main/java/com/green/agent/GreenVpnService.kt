@@ -53,16 +53,16 @@ class GreenVpnService : VpnService() {
             .setBlocking(true)
             .establish()
         running.set(true)
+        Thread { blocklistLoop(config) }.apply {
+            name = "GreenVpnBlocklistLoop"
+            start()
+        }
         worker = Thread { runLoop(config) }.apply {
             name = "GreenVpnDnsLoop"
             start()
         }
         Thread { heartbeatLoop(config) }.apply {
             name = "GreenVpnHeartbeatLoop"
-            start()
-        }
-        Thread { blocklistLoop(config) }.apply {
-            name = "GreenVpnBlocklistLoop"
             start()
         }
     }
@@ -159,11 +159,10 @@ class GreenVpnService : VpnService() {
     private fun blocklistLoop(config: AppConfig) {
         val api = ApiClient(config.serverUrl)
         while (running.get()) {
-            runCatching {
-                val blocklist = api.fetchBlocklist(config)
-                classifier.updateDynamicDomains(blocklist.domains)
-                classifier.updateBlockedKeywords(blocklist.keywords)
-            }
+            val blocklist = runCatching { api.fetchBlocklist(config) }
+                .getOrElse { LocalBlocklist.load(this) }
+            classifier.updateDynamicDomains(blocklist.domains)
+            classifier.updateBlockedKeywords(blocklist.keywords)
             sleepInterruptibly(BLOCKLIST_REFRESH_MS)
         }
     }
