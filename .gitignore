@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local runtime data
+server/data/
+agent-windows/agent.config.json
+agent-windows/*.local.json
+
+# Build caches and temporary output
+agent-windows/build/
+agent-windows/dist/*/
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

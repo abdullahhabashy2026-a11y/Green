@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="30">
+    <title>Green Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Green v0.1</p>
+          <h1>Presence Monitor</h1>
+        </div>
+        <div class="timestamp">Updated {{ generated_at }}</div>
+      </header>
+
+      <section class="summary-grid summary-grid-five" aria-label="Device status summary">
+        <div class="summary-tile status-active">
+          <span>{{ counts.active }}</span>
+          <strong>Active</strong>
+        </div>
+        <div class="summary-tile status-exited">
+          <span>{{ counts.exited }}</span>
+          <strong>Exited</strong>
+        </div>
+        <div class="summary-tile status-delayed">
+          <span>{{ counts.delayed }}</span>
+          <strong>Delayed</strong>
+        </div>
+        <div class="summary-tile status-no-signal">
+          <span>{{ counts.no_signal }}</span>
+          <strong>No Signal</strong>
+        </div>
+        <div class="summary-tile status-never">
+          <span>{{ counts.never }}</span>
+          <strong>Waiting for Install</strong>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Register Device</h2>
+        </div>
+        <form class="device-form" method="post" action="/devices">
+          <label>
+            Recovery name
+            <input name="recovery_name" placeholder="Person or case code" required>
+          </label>
+          <button type="submit">Add Device</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Devices</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Recovery</th>
+                <th>Activity</th>
+                <th>Activation Token</th>
+                <th>Device ID</th>
+                <th>Device</th>
+                <th>Windows User</th>
+                <th>Version</th>
+                <th>Last Seen</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for device in devices %}
+              <tr>
+                <td>
+                  <span class="status-pill {{ device.computed_status.class_name }}">
+                    {{ device.computed_status.label }}
+                  </span>
+                </td>
+                <td>{{ device.recovery_name }}</td>
+                <td>
+                  <a class="action-link" href="/devices/{{ device.device_id }}/activity">View</a>
+                </td>
+                <td><code>{{ device.token }}</code></td>
+                <td><code>{{ device.device_id }}</code></td>
+                <td>{{ device.device_name or "-" }}</td>
+                <td>{{ device.windows_user or "-" }}</td>
+                <td>{{ device.agent_version or "-" }}</td>
+                <td>{{ device.last_seen_at or "-" }}</td>
+                <td>
+                  {% if device.computed_status.minutes_ago is none %}
+                    -
+                  {% else %}
+                    {{ device.computed_status.minutes_ago }} min
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td class="empty-state" colspan="10">No devices registered yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading panel-heading-row">
+          <div>
+            <h2>Blocked Domains</h2>
+            <p class="panel-subtitle">
+              {{ blocked_domain_total }} saved domains. The table opens only when needed.
+            </p>
+          </div>
+          <a class="action-link" href="/blocked-domains">View Domains</a>
+        </div>
+        <form class="domain-form" method="post" action="/blocked-domains">
+          <label>
+            Domain
+            <input name="domain" placeholder="example.com" required>
+          </label>
+          <label>
+            Category
+            <select name="category" required>
+              <option value="adult">Adult</option>
+              <option value="social">Social</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <button type="submit">Add Domain</button>
+        </form>
+
+        <form class="bulk-domain-form" method="post" action="/blocked-domains/import">
+          <label>
+            Bulk domains
+            <textarea name="domains" placeholder="facebook.com&#10;instagram.com&#10;tiktok.com" required></textarea>
+          </label>
+          <label>
+            Category
+            <select name="category" required>
+              <option value="adult">Adult</option>
+              <option value="social">Social</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <button type="submit">Import List</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading panel-heading-row">
+          <div>
+            <h2>Remote Blocklists</h2>
+            <p class="panel-subtitle">Update adult domain lists from trusted online sources.</p>
+          </div>
+          <form method="post" action="/remote-blocklists/update-all">
+            <button type="submit">Update All</button>
+          </form>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Domains Found</th>
+                <th>New Imported</th>
+                <th>Last Success</th>
+                <th>Last Checked</th>
+                <th>Error</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for source in remote_blocklists %}
+              <tr>
+                <td>
+                  <strong>{{ source.name }}</strong>
+                  <div class="muted-url">{{ source.url }}</div>
+                </td>
+                <td>{{ source.category }}</td>
+                <td>{{ source.last_domain_count }}</td>
+                <td>{{ source.last_import_count }}</td>
+                <td>{{ source.last_success_at or "-" }}</td>
+                <td>{{ source.last_checked_at or "-" }}</td>
+                <td>
+                  {% if source.last_error %}
+                    <span class="error-text">{{ source.last_error }}</span>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  <form method="post" action="/remote-blocklists/{{ source.id }}/update">
+                    <button class="small-button" type="submit">Update</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td class="empty-state" colspan="8">No remote blocklists configured.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

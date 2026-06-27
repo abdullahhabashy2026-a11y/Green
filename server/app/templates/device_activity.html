@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="30">
+    <title>Green Activity</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Green v0.1</p>
+          <h1>{{ device.recovery_name }}</h1>
+        </div>
+        <div class="timestamp">Updated {{ generated_at }}</div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-heading panel-heading-row">
+          <div>
+            <h2>Domain Activity</h2>
+            <p class="panel-subtitle">{{ device.device_name or device.device_id }}</p>
+          </div>
+          <a class="action-link" href="/">Back</a>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Decision</th>
+                <th>Category</th>
+                <th>Domain</th>
+                <th>Reason</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for event in domain_events %}
+              <tr>
+                <td>
+                  <span class="decision-pill decision-{{ event.decision }}">
+                    {{ event.decision }}
+                  </span>
+                </td>
+                <td>{{ event.category }}</td>
+                <td><code>{{ event.domain }}</code></td>
+                <td>{{ event.reason or "-" }}</td>
+                <td>{{ event.created_at }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td class="empty-state" colspan="5">No domain activity recorded for this device yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
