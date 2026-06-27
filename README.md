@@ -4,9 +4,9 @@ Green v0.1 is a local proof of concept for monitoring whether a Windows agent is
 
 ## Current Phase
 
-**Phase:** `windows-dns-local-proof-of-concept`
+**Phase:** `windows-effective-adult-site-blocking`
 
-This phase proves the Windows local workflow: admin dashboard, token-based Agent activation, 60-second presence heartbeat, DNS-level blocking, remote adult blocklists, DNS restore safety, and basic false-positive protection through an Agent allowlist.
+This phase marks a working Windows version for blocking known adult websites using local DNS filtering, imported adult blocklists, DNS restore safety, and basic false-positive protection through an Agent allowlist.
 
 ## Components
 

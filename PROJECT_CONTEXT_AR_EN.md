@@ -11,10 +11,10 @@ This document records the current project state so development can continue late
 ### المرحلة الحالية
 
 ```text
-windows-dns-local-proof-of-concept
+windows-effective-adult-site-blocking
 ```
 
-هذه المرحلة تثبت مسار Windows المحلي: داشبورد للأدمن، تفعيل Agent بالتوكن، heartbeat كل 60 ثانية، حجب DNS، قوائم حجب Adult يتم تحديثها/استيرادها، حماية استرجاع DNS، وتحسين مبدئي لتقليل الحجب الخاطئ عبر Allowlist داخل الـ Agent.
+هذه المرحلة تمثل نسخة Windows فعالة لحجب المواقع الإباحية المعروفة عبر DNS المحلي وقوائم Adult المستوردة، مع داشبورد للأدمن، تفعيل Agent بالتوكن، heartbeat كل 60 ثانية، حماية استرجاع DNS، وتقليل مبدئي للحجب الخاطئ عبر Allowlist داخل الـ Agent.
 
 ### الهدف العام
 
@@ -387,10 +387,10 @@ cd "E:\HABASHY\Python Codes\Green\agent-windows"
 ### Current Phase
 
 ```text
-windows-dns-local-proof-of-concept
+windows-effective-adult-site-blocking
 ```
 
-This phase proves the local Windows workflow: admin dashboard, token-based Agent activation, 60-second presence heartbeat, DNS-level blocking, imported/updated adult blocklists, DNS restore safety, and basic false-positive reduction through an Agent allowlist.
+This phase marks a working Windows version for blocking known adult websites using local DNS filtering and imported adult blocklists, with an admin dashboard, token-based Agent activation, 60-second presence heartbeat, DNS restore safety, and basic false-positive reduction through an Agent allowlist.
 
 ### General Goal
 
